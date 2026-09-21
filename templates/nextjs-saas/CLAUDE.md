@@ -117,6 +117,37 @@ export async function POST(req: Request) {
 }
 ```
 
+**Server Actions (forms / mutations from RSC)**
+
+Prefer Server Actions for cookie-auth form posts; keep Route Handlers for webhooks and external clients.
+
+```ts
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { getDb } from "@/db/client";
+import { requireSession } from "@/lib/auth";
+
+const Input = z.object({ name: z.string().min(1).max(80) });
+
+export async function createOrg(raw: unknown) {
+  const session = await requireSession();
+  const input = Input.parse(raw);
+  const db = getDb();
+  // parameterized INSERT … RETURNING id
+  revalidatePath("/dashboard");
+  return { ok: true as const };
+}
+```
+
+Rules:
+- Mark the module `"use server"` (or the export) — never import server-only DB code into a Client Component.
+- Validate with Zod at the action boundary; treat `FormData` as untrusted.
+- Return serializable results; throw typed errors the UI can map.
+- Call `revalidatePath` / `revalidateTag` after mutations so RSC trees refresh.
+- Do not put Stripe secret keys or `SESSION_SECRET` in action files that are also imported by client trees.
+
 ## What we don't do (and why)
 
 | Anti-pattern | Why not |
@@ -141,9 +172,10 @@ export async function POST(req: Request) {
 
 ## Quick checklist for a new feature
 
-- [ ] Zod schema at the boundary
+- [ ] Zod schema at the boundary (action, Route Handler, or form)
 - [ ] Migration if schema changes
-- [ ] Server Component or Route Handler owns data access
+- [ ] Server Component, Server Action, or Route Handler owns data access
 - [ ] Money in cents
 - [ ] No secrets in client bundles
 - [ ] `pnpm typecheck` clean
+- [ ] Mutating path has at least one integration or action test
