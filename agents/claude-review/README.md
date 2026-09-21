@@ -23,7 +23,7 @@ export ANTHROPIC_API_KEY=sk-ant-...   # omit for offline heuristic mode
 export GITHUB_TOKEN=ghp_...           # public PRs work unauthenticated
 ```
 
-Requires: Python 3.9+ (stdlib only).
+Requires: Python 3.9+ (stdlib only). Layout: `claude_review.py` + `lib/` (`github_io`, `heuristic`, `output`, `patterns`).
 
 ## Usage (CLI)
 
