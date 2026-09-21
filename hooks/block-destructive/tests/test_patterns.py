@@ -20,6 +20,7 @@ BLOCK = [
     "rm -fr ./dist",
     "sudo rm -rf /var/cache/tmp",
     "echo hi && rm -rf build",
+    "env rm -rf dist",
     "DROP TABLE users;",
     "drop table if exists sessions",
     "TRUNCATE TABLE cache;",
@@ -46,10 +47,10 @@ ALLOW = [
 ]
 
 
-def run_hook(command: str, cwd: str = "/tmp/proj") -> tuple[int, str]:
+def run_hook(command: str, cwd: str = "/tmp/proj", tool_name: str = "Bash") -> tuple[int, str]:
     payload = {
         "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
+        "tool_name": tool_name,
         "tool_input": {"command": command},
         "cwd": cwd,
     }
@@ -58,7 +59,6 @@ def run_hook(command: str, cwd: str = "/tmp/proj") -> tuple[int, str]:
     sys.stdin = io.StringIO(json.dumps(payload))
     sys.stdout = buf
     try:
-        # Point log into temp so we don't write home during CI
         with tempfile.TemporaryDirectory() as td:
             mod.LOG_PATH = Path(td) / "blocked.log"
             code = mod.main()
@@ -78,11 +78,9 @@ def main() -> int:
         else:
             print(f"OK   block: {cmd!r}")
 
-    # ALLOW except the intentional DROP TABLE string case which should block
     for cmd in ALLOW:
         code, out = run_hook(cmd)
-        expect_deny = "DROP TABLE" in cmd.upper() and "SELECT" not in cmd.upper()
-        # the last ALLOW entry intentionally contains DROP TABLE → deny
+        expect_deny = False
         if cmd.startswith("echo DROP"):
             expect_deny = True
         denied = "permissionDecision" in out and '"deny"' in out
@@ -95,7 +93,34 @@ def main() -> int:
         else:
             print(f"OK   {'deny ' if expect_deny else 'allow'}: {cmd!r}")
 
-    # Log line shape (drive hook with LOG_PATH already set)
+    # Non-Bash tools must pass through even if command text looks dangerous
+    code, out = run_hook("rm -rf /tmp/x", tool_name="Read")
+    if '"deny"' in out:
+        print(f"FAIL non-Bash pass-through: {out!r}")
+        failed += 1
+    else:
+        print("OK   non-Bash pass-through")
+
+    # Empty stdin / malformed JSON → exit 0, no crash
+    old_in, old_out = sys.stdin, sys.stdout
+    try:
+        sys.stdin = io.StringIO("")
+        sys.stdout = io.StringIO()
+        if mod.main() != 0:
+            print("FAIL empty stdin")
+            failed += 1
+        else:
+            print("OK   empty stdin")
+        sys.stdin = io.StringIO("{not-json")
+        sys.stdout = io.StringIO()
+        if mod.main() != 0:
+            print("FAIL bad JSON")
+            failed += 1
+        else:
+            print("OK   bad JSON")
+    finally:
+        sys.stdin, sys.stdout = old_in, old_out
+
     with tempfile.TemporaryDirectory() as td:
         log = Path(td) / "blocked.log"
         mod.LOG_PATH = log
